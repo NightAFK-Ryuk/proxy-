@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Bot Panel</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: monospace; background: #0f172a; color: #f8fafc; padding: 20px; margin: 0; }
+        .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
+        .card { background: #1e293b; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.5); }
+        input, textarea, select, button { width: 100%; padding: 10px; margin-top: 5px; margin-bottom: 12px; background: #334155; color: #fff; border: 1px solid #475569; border-radius: 4px; box-sizing: border-box; }
+        button { background: #16a34a; font-weight: bold; cursor: pointer; border: none; }
+        button:hover { background: #15803d; }
+        .btn-stop { background: #dc2626; margin-top: 5px; }
+        .btn-stop:hover { background: #b91c1c; }
+        .chat-box { height: 260px; overflow-y: auto; background: #020617; padding: 10px; border: 1px solid #1e293b; margin-bottom: 10px; font-size: 13px; border-radius: 4px; }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
+        .btn-group button { background: #2563eb; }
+        .btn-group button:hover { background: #1d4ed8; }
+    </style>
+</head>
+<body>
+
+<h2>Minecraft Bot & SOCKS5 Panel</h2>
+
+<div class="grid">
+    <div class="card">
+        <h3>Deployment Settings</h3>
+        <label>Server IP:</label>
+        <input type="text" id="serverIp" value="as.gamster.org">
+        
+        <label>Server Port:</label>
+        <input type="number" id="serverPort" value="25565">
+
+        <label>Bot Usernames (One per line):</label>
+        <textarea id="botUsernames" rows="3" placeholder="Player1&#10;Player2"></textarea>
+        
+        <label>Auth Password (/register & /login):</label>
+        <input type="text" id="botPassword" value="MyPass123">
+
+        <label>Reconnect Delay (Seconds):</label>
+        <input type="number" id="reconnectDelay" value="5">
+
+        <label>Proxies (Format: host:port:user:pass — One per line):</label>
+        <textarea id="proxies" rows="4" placeholder="v6.ww-pr.plainproxies.com:1339:user:pass"></textarea>
+
+        <button onclick="deployBots()">Deploy Bots</button>
+    </div>
+
+    <div class="card">
+        <h3>Bot Monitor</h3>
+        <label>Select Active Bot:</label>
+        <select id="botSelect" onchange="switchBot()"></select>
+        
+        <p>Status: <b id="botStatus">Offline</b> | Uptime: <b id="botUptime">0</b>s</p>
+        
+        <h4>In-Game Chat Log</h4>
+        <div class="chat-box" id="chatLog"></div>
+        <input type="text" id="chatInput" placeholder="Type chat message here...">
+        <button onclick="sendChat()">Send Chat Message</button>
+        <button class="btn-stop" onclick="stopBot()">Disconnect Active Bot</button>
+
+        <h4>Movement Controls</h4>
+        <div class="btn-group">
+            <div></div>
+            <button onmousedown="move('forward', true)" onmouseup="move('forward', false)">Forward ▲</button>
+            <div></div>
+            <button onmousedown="move('left', true)" onmouseup="move('left', false)">◄ Left</button>
+            <button onmousedown="move('back', true)" onmouseup="move('back', false)">Back ▼</button>
+            <button onmousedown="move('right', true)" onmouseup="move('right', false)">Right ►</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    const botData = {};
+
+    function deployBots() {
+        const usernames = document.getElementById('botUsernames').value.split('\n').filter(u => u.trim() !== '');
+        const proxyLines = document.getElementById('proxies').value.split('\n').filter(p => p.trim() !== '');
+        
+        socket.emit('deploy_bots', {
+            serverIp: document.getElementById('serverIp').value,
+            serverPort: document.getElementById('serverPort').value,
+            botPassword: document.getElementById('botPassword').value,
+            usernames: usernames,
+            proxies: proxyLines,
+            reconnectDelay: document.getElementById('reconnectDelay').value
+        });
+    }
+
+    socket.on('bot_status', ({ botId, status }) => {
+        ensureBotExists(botId);
+        botData[botId].status = status;
+        updateUI();
+    });
+
+    socket.on('bot_uptime', ({ botId, uptime }) => {
+        ensureBotExists(botId);
+        botData[botId].uptime = uptime;
+        if (getSelectedBot() === botId) {
+            document.getElementById('botUptime').innerText = uptime;
+        }
+    });
+
+    socket.on('bot_chat', ({ botId, message }) => {
+        ensureBotExists(botId);
+        botData[botId].logs.push(message);
+        if (getSelectedBot() === botId) appendLog(message);
+    });
+
+    socket.on('bot_log', ({ botId, text }) => {
+        ensureBotExists(botId);
+        botData[botId].logs.push(`[System] ${text}`);
+        if (getSelectedBot() === botId) appendLog(`[System] ${text}`);
+    });
+
+    function ensureBotExists(botId) {
+        if (!botData[botId]) {
+            botData[botId] = { status: 'Offline', uptime: 0, logs: [] };
+            const select = document.getElementById('botSelect');
+            const opt = document.createElement('option');
+            opt.value = botId;
+            opt.innerText = botId;
+            select.appendChild(opt);
+        }
+    }
+
+    function getSelectedBot() {
+        return document.getElementById('botSelect').value;
+    }
+
+    function switchBot() {
+        const botId = getSelectedBot();
+        if (!botId || !botData[botId]) return;
+        
+        document.getElementById('botStatus').innerText = botData[botId].status;
+        document.getElementById('botUptime').innerText = botData[botId].uptime;
+        
+        const chatLog = document.getElementById('chatLog');
+        chatLog.innerHTML = '';
+        botData[botId].logs.forEach(log => appendLog(log));
+    }
+
+    function appendLog(text) {
+        const chatLog = document.getElementById('chatLog');
+        chatLog.innerHTML += `<div>${text}</div>`;
+        chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function sendChat() {
+        const botId = getSelectedBot();
+        const input = document.getElementById('chatInput');
+        if (botId && input.value) {
+            socket.emit('send_chat', { botId, message: input.value });
+            input.value = '';
+        }
+    }
+
+    function stopBot() {
+        const botId = getSelectedBot();
+        if (botId) {
+            socket.emit('stop_bot', botId);
+        }
+    }
+
+    function move(direction, state) {
+        const botId = getSelectedBot();
+        if (botId) {
+            socket.emit('move_bot', { botId, direction, state });
+        }
+    }
+
+    function updateUI() {
+        switchBot();
+    }
+</script>
+</body>
+</html>
+
