@@ -1,0 +1,18 @@
+{
+  "name": "mc-bot-manager",
+  "version": "1.0.0",
+  "description": "Minecraft Bot & SOCKS5 IPv6 Dashboard Manager",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mineflayer": "^4.20.1",
+    "socket.io": "^4.7.5",
+    "socks": "^2.8.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
